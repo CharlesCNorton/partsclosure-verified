@@ -19,22 +19,26 @@ From Stdlib Require Import List.
 From Stdlib Require Import Arith.
 From Stdlib Require Import Bool.
 From Stdlib Require Import Lia.
+From Stdlib Require Import Permutation.
 Import ListNotations.
 
 (* ========================================================================== *)
-(* 1. Parts and recipes.                                                      *)
+(* Module Type: a decidable carrier for parts.                                *)
 (* ========================================================================== *)
 
-(* Parts are identified by a type with decidable equality. Natural numbers    *)
-(* serve as concrete witnesses; the development is parametric otherwise.      *)
+Module Type PART.
+  Parameter t : Type.
+  Parameter eq_dec : forall x y : t, {x = y} + {x <> y}.
+End PART.
 
-Definition Part := nat.
+(* ========================================================================== *)
+(* The closure development, parametric over any decidable carrier.            *)
+(* ========================================================================== *)
 
-Definition Part_eq_dec : forall (x y : Part), {x = y} + {x <> y} := Nat.eq_dec.
+Module Make (P : PART).
 
-(* A recipe consumes a list of input parts and produces a single output       *)
-(* part. A part with no recipe producing it is, by construction, never in     *)
-(* any closed subset (Theorem no_recipe_excluded below).                      *)
+Definition Part := P.t.
+Definition Part_eq_dec := P.eq_dec.
 
 Record Recipe : Type := mkRecipe {
   inputs : list Part;
@@ -43,9 +47,9 @@ Record Recipe : Type := mkRecipe {
 
 Definition Catalog := list Recipe.
 
-(* ========================================================================== *)
-(* 2. Decidable membership and subset.                                        *)
-(* ========================================================================== *)
+(* -------------------------------------------------------------------------- *)
+(* Membership and subset on Part lists.                                       *)
+(* -------------------------------------------------------------------------- *)
 
 Fixpoint mem (x : Part) (l : list Part) : bool :=
   match l with
@@ -57,9 +61,7 @@ Lemma mem_iff_In : forall (x : Part) (l : list Part),
   mem x l = true <-> In x l.
 Proof.
   intros x l. induction l as [|y rest IH].
-  - cbn. split.
-    + intros H. discriminate.
-    + intros H. destruct H.
+  - cbn. split. + intros H. discriminate. + intros H. destruct H.
   - cbn. destruct (Part_eq_dec x y) as [E | NE].
     + split.
       * intros _. left. symmetry. exact E.
@@ -81,12 +83,9 @@ Proof.
   - apply mem_iff_In. apply H. exact Hin.
 Qed.
 
-(* ========================================================================== *)
-(* 3. Producibility.                                                          *)
-(* ========================================================================== *)
-
-(* A recipe r produces p from the supply set S when its output is p and       *)
-(* every one of its inputs lies in S.                                         *)
+(* -------------------------------------------------------------------------- *)
+(* Producibility.                                                             *)
+(* -------------------------------------------------------------------------- *)
 
 Definition producible_by (r : Recipe) (S : list Part) (p : Part) : bool :=
   match Part_eq_dec (output r) p with
@@ -112,22 +111,15 @@ Proof.
     apply subset_b_iff_incl. exact Hsub.
 Qed.
 
-(* ========================================================================== *)
-(* 4. The step operator.                                                      *)
-(* ========================================================================== *)
-
-(* step C S retains exactly those parts of S which are producible from S      *)
-(* using catalog C. This is the operator whose greatest fixed point on        *)
-(* the powerset of S is the closure.                                          *)
+(* -------------------------------------------------------------------------- *)
+(* The step operator.                                                         *)
+(* -------------------------------------------------------------------------- *)
 
 Definition step (C : Catalog) (S : list Part) : list Part :=
   filter (fun p => producible C S p) S.
 
 Lemma step_incl : forall C S, incl (step C S) S.
-Proof.
-  intros C S p Hin. unfold step in Hin.
-  apply filter_In in Hin. tauto.
-Qed.
+Proof. intros C S p Hin. apply filter_In in Hin. tauto. Qed.
 
 Lemma step_monotone : forall C S T,
   incl S T -> incl (step C S) (step C T).
@@ -145,9 +137,9 @@ Qed.
 Lemma step_length_le : forall C S, length (step C S) <= length S.
 Proof. intros. apply filter_length_le. Qed.
 
-(* ========================================================================== *)
-(* 5. Filter helper lemmas (no admits).                                       *)
-(* ========================================================================== *)
+(* -------------------------------------------------------------------------- *)
+(* Filter helpers.                                                            *)
+(* -------------------------------------------------------------------------- *)
 
 Lemma filter_length_eq_iff_filter_eq :
   forall (A : Type) (f : A -> bool) (L : list A),
@@ -191,15 +183,9 @@ Proof.
   f_equal. apply IH. intros x Hin. apply Hall. cbn. right. exact Hin.
 Qed.
 
-(* ========================================================================== *)
-(* 6. Closure operator (bounded iteration on length S).                       *)
-(* ========================================================================== *)
-
-(* The closure is computed by iterating step until the length stabilizes.     *)
-(* Since length is non-increasing and bounded below by zero, stabilization    *)
-(* occurs within at most |S| iterations. The structural recursion is on the   *)
-(* iteration counter, which we instantiate to length S in the definition of   *)
-(* closure.                                                                   *)
+(* -------------------------------------------------------------------------- *)
+(* Closure operator.                                                          *)
+(* -------------------------------------------------------------------------- *)
 
 Fixpoint closure_n (n : nat) (C : Catalog) (S : list Part) : list Part :=
   match n with
@@ -213,9 +199,9 @@ Fixpoint closure_n (n : nat) (C : Catalog) (S : list Part) : list Part :=
 Definition closure (C : Catalog) (S : list Part) : list Part :=
   closure_n (length S) C S.
 
-(* ========================================================================== *)
-(* 7. Closure properties.                                                     *)
-(* ========================================================================== *)
+(* -------------------------------------------------------------------------- *)
+(* Closure properties.                                                        *)
+(* -------------------------------------------------------------------------- *)
 
 Lemma closure_n_incl : forall n C S, incl (closure_n n C S) S.
 Proof.
@@ -265,15 +251,11 @@ Proof.
   intros. apply closed_iff_step_eq. apply closure_fixpoint.
 Qed.
 
-(* Soundness: every part of the closure has a witnessing recipe whose        *)
-(* inputs all lie in the closure.                                             *)
-
 Theorem closure_sound : forall C S p,
   In p (closure C S) ->
   exists r, In r C /\ output r = p /\ incl (inputs r) (closure C S).
 Proof.
-  intros C S p H.
-  apply producible_correct.
+  intros C S p H. apply producible_correct.
   apply (closure_is_closed C S). exact H.
 Qed.
 
@@ -290,8 +272,6 @@ Proof.
         apply (step_monotone C S' S Hsub). exact Hp.
       * exact Hcl.
 Qed.
-
-(* Maximality: any closed subset of S is contained in the closure of S.      *)
 
 Theorem closure_maximal : forall C S S',
   incl S' S -> closed C S' -> incl S' (closure C S).
@@ -321,9 +301,6 @@ Proof.
   - apply closure_is_closed.
 Qed.
 
-(* The three properties that characterize closure as the greatest closed     *)
-(* sublist of S.                                                              *)
-
 Theorem closure_characterization : forall C S,
   incl (closure C S) S /\
   closed C (closure C S) /\
@@ -335,9 +312,91 @@ Proof.
   - apply closure_maximal.
 Qed.
 
-(* ========================================================================== *)
-(* 8. Decidable closedness.                                                   *)
-(* ========================================================================== *)
+(* -------------------------------------------------------------------------- *)
+(* NoDup preservation.                                                        *)
+(* -------------------------------------------------------------------------- *)
+
+Lemma step_NoDup : forall C S, NoDup S -> NoDup (step C S).
+Proof. intros. apply NoDup_filter. exact H. Qed.
+
+Lemma closure_n_NoDup : forall n C S, NoDup S -> NoDup (closure_n n C S).
+Proof.
+  induction n as [|n' IH]; intros C S H; cbn.
+  - exact H.
+  - destruct (Nat.eqb (length (step C S)) (length S)) eqn:E.
+    + exact H.
+    + apply IH. apply step_NoDup. exact H.
+Qed.
+
+Theorem closure_NoDup : forall C S, NoDup S -> NoDup (closure C S).
+Proof. intros. apply closure_n_NoDup. exact H. Qed.
+
+(* -------------------------------------------------------------------------- *)
+(* Permutation invariance: producibility depends only on set membership.      *)
+(* -------------------------------------------------------------------------- *)
+
+Lemma mem_perm : forall x S T,
+  Permutation S T -> mem x S = mem x T.
+Proof.
+  intros x S T HP.
+  destruct (mem x S) eqn:ES; destruct (mem x T) eqn:ET; try reflexivity.
+  - apply mem_iff_In in ES. apply (Permutation_in _ HP) in ES.
+    apply mem_iff_In in ES. rewrite ES in ET. discriminate.
+  - apply mem_iff_In in ET. apply Permutation_sym in HP.
+    apply (Permutation_in _ HP) in ET.
+    apply mem_iff_In in ET. rewrite ET in ES. discriminate.
+Qed.
+
+Lemma subset_b_perm : forall L S T,
+  Permutation S T -> subset_b L S = subset_b L T.
+Proof.
+  intros L S T HP. unfold subset_b.
+  induction L as [|x rest IH]; cbn; [reflexivity|].
+  rewrite (mem_perm x S T HP). rewrite IH. reflexivity.
+Qed.
+
+Lemma producible_perm : forall C S T p,
+  Permutation S T -> producible C S p = producible C T p.
+Proof.
+  intros C S T p HP. unfold producible.
+  induction C as [|r rest IH]; cbn; [reflexivity|].
+  assert (Hhead : producible_by r S p = producible_by r T p).
+  { unfold producible_by. destruct (Part_eq_dec (output r) p); [|reflexivity].
+    apply subset_b_perm. exact HP. }
+  rewrite Hhead, IH. reflexivity.
+Qed.
+
+(* The unconditional Permutation form fails because the filter predicate    *)
+(* depends on the list being permuted. We prove inclusion in both directions *)
+(* and combine via NoDup_Permutation to recover the operationally useful     *)
+(* statement under NoDup.                                                    *)
+
+Lemma step_perm_incl : forall C S T,
+  Permutation S T -> incl (step C S) (step C T).
+Proof.
+  intros C S T HP p Hin.
+  apply filter_In in Hin. destruct Hin as [HinS Hprod].
+  apply filter_In. split.
+  - apply (Permutation_in _ HP). exact HinS.
+  - rewrite <- (producible_perm C S T p HP). exact Hprod.
+Qed.
+
+Theorem step_perm_NoDup : forall C S T,
+  NoDup S -> NoDup T ->
+  Permutation S T -> Permutation (step C S) (step C T).
+Proof.
+  intros C S T HndS HndT HP.
+  apply NoDup_Permutation.
+  - apply step_NoDup. exact HndS.
+  - apply step_NoDup. exact HndT.
+  - intros x. split.
+    + intros H. apply (step_perm_incl C S T HP). exact H.
+    + intros H. apply (step_perm_incl C T S (Permutation_sym HP)). exact H.
+Qed.
+
+(* -------------------------------------------------------------------------- *)
+(* Decidable closedness.                                                      *)
+(* -------------------------------------------------------------------------- *)
 
 Definition is_closed_b (C : Catalog) (S : list Part) : bool :=
   Nat.eqb (length (step C S)) (length S).
@@ -352,10 +411,9 @@ Proof.
   apply filter_length_eq_iff_filter_eq.
 Qed.
 
-(* ========================================================================== *)
-(* 9. Negative result: parts without a producing recipe never appear in the   *)
-(*    closure.                                                                *)
-(* ========================================================================== *)
+(* -------------------------------------------------------------------------- *)
+(* No-recipe exclusion.                                                       *)
+(* -------------------------------------------------------------------------- *)
 
 Theorem no_recipe_excluded : forall C S p,
   (forall r, In r C -> output r <> p) ->
@@ -368,11 +426,77 @@ Proof.
   apply (Hno r); assumption.
 Qed.
 
+(* -------------------------------------------------------------------------- *)
+(* Dual operator: derivable_set, the largest closed set under C.              *)
+(* -------------------------------------------------------------------------- *)
+
+Definition all_outputs (C : Catalog) : list Part :=
+  nodup Part_eq_dec (map output C).
+
+Lemma all_outputs_NoDup : forall C, NoDup (all_outputs C).
+Proof. intros. apply NoDup_nodup. Qed.
+
+Definition derivable_set (C : Catalog) : list Part :=
+  closure C (all_outputs C).
+
+Theorem derivable_set_closed : forall C, closed C (derivable_set C).
+Proof. intros. apply closure_is_closed. Qed.
+
+Theorem derivable_set_NoDup : forall C, NoDup (derivable_set C).
+Proof. intros. apply closure_NoDup. apply all_outputs_NoDup. Qed.
+
+(* Every closed set is contained in derivable_set: closed parts are outputs. *)
+
+Theorem closed_subset_derivable : forall C X,
+  closed C X -> incl X (derivable_set C).
+Proof.
+  intros C X HX.
+  apply closure_maximal.
+  - intros p Hp. apply HX in Hp. apply producible_correct in Hp.
+    destruct Hp as [r [HrC [Hreq _]]].
+    unfold all_outputs. apply nodup_In.
+    apply in_map_iff. exists r. split; assumption.
+  - exact HX.
+Qed.
+
+(* A closed superset of T exists iff T is contained in derivable_set.        *)
+
+Theorem closed_superset_iff : forall C T,
+  (exists X, closed C X /\ incl T X) <-> incl T (derivable_set C).
+Proof.
+  intros C T. split.
+  - intros [X [HX HT]].
+    eapply incl_tran; [exact HT|]. apply closed_subset_derivable. exact HX.
+  - intros HT. exists (derivable_set C). split.
+    + apply derivable_set_closed.
+    + exact HT.
+Qed.
+
+(* The closure of any seed S is itself contained in derivable_set.           *)
+
+Theorem closure_subset_derivable : forall C S,
+  incl (closure C S) (derivable_set C).
+Proof.
+  intros. apply closed_subset_derivable. apply closure_is_closed.
+Qed.
+
+End Make.
+
 (* ========================================================================== *)
-(* 10. Worked example.                                                        *)
+(* Concrete instantiation: Part = nat.                                        *)
 (* ========================================================================== *)
 
-(* A small catalog modelling a metalwork bootstrap fragment.                  *)
+Module NatPart <: PART.
+  Definition t := nat.
+  Definition eq_dec := Nat.eq_dec.
+End NatPart.
+
+Module NC := Make NatPart.
+Import NC.
+
+(* ========================================================================== *)
+(* Worked example.                                                            *)
+(* ========================================================================== *)
 
 Definition Iron    : Part := 1.
 Definition Wood    : Part := 2.
@@ -381,9 +505,6 @@ Definition Steel   : Part := 4.
 Definition Hammer  : Part := 5.
 Definition Anvil   : Part := 6.
 Definition Furnace : Part := 7.
-
-(* The full catalog: raw extraction recipes for Iron, Wood, Coal plus four    *)
-(* manufacturing recipes (Steel, Hammer, Anvil, Furnace).                     *)
 
 Definition full_catalog : Catalog := [
   mkRecipe []                       Iron;
@@ -394,8 +515,6 @@ Definition full_catalog : Catalog := [
   mkRecipe [Iron; Iron]             Anvil;
   mkRecipe [Steel; Steel; Steel]    Furnace
 ].
-
-(* The partial catalog drops the Steel recipe: Steel cannot be manufactured.  *)
 
 Definition partial_catalog : Catalog := [
   mkRecipe []                       Iron;
@@ -409,8 +528,6 @@ Definition partial_catalog : Catalog := [
 Definition seed : list Part :=
   [Iron; Wood; Coal; Furnace; Steel; Hammer; Anvil].
 
-(* Under the partial catalog, no recipe outputs Steel. *)
-
 Theorem partial_catalog_no_steel :
   forall r, In r partial_catalog -> output r <> Steel.
 Proof.
@@ -419,17 +536,30 @@ Proof.
           [subst r; cbn; discriminate | ]); contradiction.
 Qed.
 
-(* Therefore Steel is excluded from the closure under the partial catalog.   *)
-
 Corollary partial_drops_steel : ~ In Steel (closure partial_catalog seed).
 Proof.
   apply no_recipe_excluded. apply partial_catalog_no_steel.
 Qed.
 
-(* The same argument generalizes: under the partial catalog, Hammer and       *)
-(* Furnace also drop out, because both require Steel as an input and Steel    *)
-(* is forbidden by the closure invariant. The closure is computable; running  *)
-(* the kernel produces the literal answer.                                    *)
+(* The dual: derivable_set computes everything makeable from raw recipes. *)
 
 Eval cbv in (closure partial_catalog seed).
 Eval cbv in (closure full_catalog    seed).
+Eval cbv in (derivable_set partial_catalog).
+Eval cbv in (derivable_set full_catalog).
+
+(* ========================================================================== *)
+(* Extraction to OCaml.                                                       *)
+(* ========================================================================== *)
+
+From Stdlib Require Import Extraction.
+From Stdlib Require Import ExtrOcamlBasic.
+From Stdlib Require Import ExtrOcamlNatInt.
+
+Extraction Language OCaml.
+
+Extraction "PartsClosure.ml"
+  closure
+  derivable_set
+  is_closed_b
+  closed_superset_iff.
