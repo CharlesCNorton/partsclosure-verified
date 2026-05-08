@@ -1,0 +1,13 @@
+*.vo
+*.vok
+*.vos
+*.glob
+*.aux
+.*.aux
+.*.cache
+.*.d
+*.cmi
+*.cmx
+*.cmxs
+*.o
+.lia.cache
